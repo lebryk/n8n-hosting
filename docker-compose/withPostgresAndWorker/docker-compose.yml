@@ -1,13 +1,13 @@
-version: '3.8'
+version: "3.8"
 
 volumes:
-  db_storage:
-  n8n_storage:
-  redis_storage:
+  pg_data:
+  n8n_data:
+  redis_data:
 
-x-shared: &shared
+x-shared: &n8n-common
+  image: docker.n8n.io/n8nio/n8n:latest
   restart: always
-  image: docker.n8n.io/n8nio/n8n
   environment:
     - DB_TYPE=postgresdb
     - DB_POSTGRESDB_HOST=postgres
@@ -19,15 +19,12 @@ x-shared: &shared
     - QUEUE_BULL_REDIS_HOST=redis
     - QUEUE_HEALTH_CHECK_ACTIVE=true
     - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
-  links:
-    - postgres
-    - redis
   volumes:
-    - n8n_storage:/home/node/.n8n
+    - n8n_data:/home/node/.n8n
   depends_on:
-    redis:
-      condition: service_healthy
     postgres:
+      condition: service_healthy
+    redis:
       condition: service_healthy
 
 services:
@@ -41,32 +38,31 @@ services:
       - POSTGRES_NON_ROOT_USER
       - POSTGRES_NON_ROOT_PASSWORD
     volumes:
-      - db_storage:/var/lib/postgresql/data
-      - ./init-data.sh:/docker-entrypoint-initdb.d/init-data.sh
+      - pg_data:/var/lib/postgresql/data
+      # Dokploy file-mount – create it in UI > Advanced > Mounts
+      - ../files/init-data.sh:/docker-entrypoint-initdb.d/init-data.sh:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      test: ["CMD-SHELL","pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
-      timeout: 5s
       retries: 10
 
   redis:
     image: redis:6-alpine
     restart: always
     volumes:
-      - redis_storage:/data
+      - redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD","redis-cli","ping"]
       interval: 5s
-      timeout: 5s
       retries: 10
 
-  n8n:
-    <<: *shared
+  n8n-main:
+    <<: *n8n-common
     ports:
-      - 5678:5678
+      - "5678:5678"
 
   n8n-worker:
-    <<: *shared
+    <<: *n8n-common
     command: worker
     depends_on:
-      - n8n
+      - n8n-main
