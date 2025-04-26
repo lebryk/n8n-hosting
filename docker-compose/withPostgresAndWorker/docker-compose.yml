@@ -1,13 +1,11 @@
-version: "3.8"
-
+version: '3.8'
 volumes:
-  pg_data:
-  n8n_data:
-  redis_data:
-
-x-shared: &n8n-common
-  image: docker.n8n.io/n8nio/n8n:latest
+  db_storage-n8n-n8n-tag3ta: null
+  n8n_storage-n8n-n8n-tag3ta: null
+  redis_storage-n8n-n8n-tag3ta: null
+x-shared:
   restart: always
+  image: docker.n8n.io/n8nio/n8n
   environment:
     - DB_TYPE=postgresdb
     - DB_POSTGRESDB_HOST=postgres
@@ -19,14 +17,16 @@ x-shared: &n8n-common
     - QUEUE_BULL_REDIS_HOST=redis
     - QUEUE_HEALTH_CHECK_ACTIVE=true
     - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
+  links:
+    - postgres
+    - redis
   volumes:
-    - n8n_data:/home/node/.n8n
+    - n8n_storage:/home/node/.n8n
   depends_on:
-    postgres:
-      condition: service_healthy
     redis:
       condition: service_healthy
-
+    postgres:
+      condition: service_healthy
 services:
   postgres:
     image: postgres:16
@@ -38,31 +38,101 @@ services:
       - POSTGRES_NON_ROOT_USER
       - POSTGRES_NON_ROOT_PASSWORD
     volumes:
-      - pg_data:/var/lib/postgresql/data
-      # Dokploy file-mount – create it in UI > Advanced > Mounts
+      - db_storage-n8n-n8n-tag3ta:/var/lib/postgresql/data
       - ../files/init-data.sh:/docker-entrypoint-initdb.d/init-data.sh:ro
     healthcheck:
-      test: ["CMD-SHELL","pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test:
+        - CMD-SHELL
+        - pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}
       interval: 5s
+      timeout: 5s
       retries: 10
-
+    networks:
+      - n8n-n8n-tag3ta
   redis:
     image: redis:6-alpine
     restart: always
     volumes:
-      - redis_data:/data
+      - redis_storage-n8n-n8n-tag3ta:/data
     healthcheck:
-      test: ["CMD","redis-cli","ping"]
+      test:
+        - CMD
+        - redis-cli
+        - ping
       interval: 5s
+      timeout: 5s
       retries: 10
-
-  n8n-main:
-    <<: *n8n-common
-    ports:
-      - "5678:5678"
-
-  n8n-worker:
-    <<: *n8n-common
-    command: worker
+    networks:
+      - n8n-n8n-tag3ta
+  n8n:
+    restart: always
+    image: docker.n8n.io/n8nio/n8n
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_NON_ROOT_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_NON_ROOT_PASSWORD}
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_HEALTH_CHECK_ACTIVE=true
+      - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    links:
+      - postgres
+      - redis
+    volumes:
+      - n8n_storage-n8n-n8n-tag3ta:/home/node/.n8n
     depends_on:
-      - n8n-main
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - '5678:5678'
+    networks:
+      - n8n-n8n-tag3ta
+    labels:
+      - traefik.http.routers.n8n-n8n-tag3ta-2-web.rule=Host(n8n.rimthan.cloud)
+      - traefik.http.routers.n8n-n8n-tag3ta-2-web.entrypoints=web
+      - traefik.http.services.n8n-n8n-tag3ta-2-web.loadbalancer.server.port=5678
+      - traefik.http.routers.n8n-n8n-tag3ta-2-web.service=n8n-n8n-tag3ta-2-web
+      - traefik.http.routers.n8n-n8n-tag3ta-2-web.middlewares=redirect-to-https@file
+      - traefik.http.routers.n8n-n8n-tag3ta-2-websecure.rule=Host(n8n.rimthan.cloud)
+      - traefik.http.routers.n8n-n8n-tag3ta-2-websecure.entrypoints=websecure
+      - traefik.http.services.n8n-n8n-tag3ta-2-websecure.loadbalancer.server.port=5678
+      - traefik.http.routers.n8n-n8n-tag3ta-2-websecure.service=n8n-n8n-tag3ta-2-websecure
+      - traefik.http.routers.n8n-n8n-tag3ta-2-websecure.tls.certresolver=letsencrypt
+      - traefik.http.routers.n8n-n8n-tag3ta-1-web.rule=Host(n8n-n8n-c43a28-34-18-12-106.traefik.me)
+      - traefik.http.routers.n8n-n8n-tag3ta-1-web.entrypoints=web
+      - traefik.http.services.n8n-n8n-tag3ta-1-web.loadbalancer.server.port=5678
+      - traefik.http.routers.n8n-n8n-tag3ta-1-web.service=n8n-n8n-tag3ta-1-web
+      - traefik.enable=true
+  n8n-worker:
+    restart: always
+    image: docker.n8n.io/n8nio/n8n
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_NON_ROOT_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_NON_ROOT_PASSWORD}
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_HEALTH_CHECK_ACTIVE=true
+      - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    links:
+      - postgres
+      - redis
+    volumes:
+      - n8n_storage-n8n-n8n-tag3ta:/home/node/.n8n
+    depends_on:
+      - n8n
+    command: worker
+    networks:
+      - n8n-n8n-tag3ta
+networks:
+  n8n-n8n-tag3ta:
+    name: n8n-n8n-tag3ta
+    external: true
